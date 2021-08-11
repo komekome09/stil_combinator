@@ -17,7 +17,7 @@ pub struct Param {
     pub arg_direction: ArgDirection,
     pub param_type: ParamType,
     pub name: String, 
-    pub value: String,
+    pub value: f32,
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,36 +69,11 @@ where
         })
 }
 
-fn parameter<Input>() -> impl Parser<Input, Output = (String, String, String, f32, String)>
+fn parameter<Input>() -> impl Parser<Input, Output = Param>
 where
     Input: Stream<Token = char>,
     Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
 {
-//    (
-//        many1(letter()).skip(spaces()),
-//        many1(letter()).skip(spaces()),
-//        many1(letter()).skip(spaces()),
-//        char('=').skip(spaces()),
-//        many1(letter()).skip(spaces()),
-//        char(';').skip(spaces()),
-//    ).map(|(arg, param, name, _, value, _)| Param {
-//        arg_direction: match &arg {
-//            "In" => ArgDirection::In,
-//            "Out" => ArgDirection::Out,
-//            _ => ArgDirection::Unknown,
-//        },
-//        param_type: match &param {
-//            "sigref_expr" => ParamType::Sigrefexpr,
-//            "Voltage" => ParamType::Voltage,
-//            "Current" => ParamType::Current,
-//            "String" => ParamType::String,
-//            "Integer" => ParamType::Integer,
-//            "Real" => ParamType::Real,
-//            _ => ParamType::Unknown,
-//        },
-//        name: name,
-//        value: value,
-//    })
     (
         many1::<String, _, _>(letter()).skip(spaces()),
         many1::<String, _, _>(letter()).skip(spaces()),
@@ -107,8 +82,24 @@ where
         digits_and_unit().skip(spaces()),
         char(';').skip(spaces()),
     )
-        .map(|(arg, param, name, _, (digit, unit), _)| (arg, param, name, digit, unit))
-        .message("hogehoge")
+        .map(|(arg, param, name, _, (digit, _), _)| Param {
+            arg_direction: match arg.as_str() {
+                "In" => ArgDirection::In,
+                "Out" => ArgDirection::Out,
+                _ => ArgDirection::Unknown,
+            },
+            param_type: match param.as_str() {
+                "sigref_expr" => ParamType::Sigrefexpr,
+                "Voltage" => ParamType::Voltage,
+                "Current" => ParamType::Current,
+                "String" => ParamType::String,
+                "Integer" => ParamType::Integer,
+                "Real" => ParamType::Real,
+                _ => ParamType::Unknown,
+            },
+            name: name,
+            value: digit,
+        })
 }
 
 #[cfg(test)]
@@ -118,8 +109,13 @@ mod tests {
     // Parsing test of parameter
     #[test]
     fn test_parse_parameter() {
-        let result = parameter().parse("In Voltage Lower = -1.3V;");
-        assert_eq!(result, Ok((("In".to_string(), "Voltage".to_string(), "Lower".to_string(), -1.3, "V".to_string()), "")));
+        let result1 = parameter().parse("In Voltage Lower = -1.3V;");
+        assert_eq!(result1, Ok((Param {
+            arg_direction: ArgDirection::In,
+            param_type: ParamType::Voltage,
+            name: "Lower".to_string(),
+            value: -1.3,
+        }, "")));
     }
 
     #[test]
