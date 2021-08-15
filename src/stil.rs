@@ -1,12 +1,13 @@
 use combine::{
     Parser, Stream,
     many1, error::{ParseError},
-    parser::char::{char, spaces, letter, digit, string_cmp},
-    optional, sep_end_by1, choice,
+    parser::char::{char, spaces, letter, digit, string_cmp, string},
+    optional, sep_end_by1, choice, between, 
 };
 
 #[derive(Debug, PartialEq)]
 pub struct Test {
+    pub name: String,
     pub library: String,
     pub parameters: Vec<Param>,
 }
@@ -145,43 +146,84 @@ where
     sep_end_by1(parameter().skip(spaces()), char(';').skip(spaces()))
 }
 
+fn test_exec<Input>() -> impl Parser<Input, Output = Test>
+where
+    Input: Stream<Token = char>,
+    Input::Error: ParseError<Input::Token, Input::Range, Input::Position>,
+{
+    (
+        string("Test").skip(spaces()),
+        text().skip(spaces()),
+        char('{').skip(spaces()),
+        string("Library").skip(spaces()),
+        text().skip(spaces()),
+        char(';').skip(spaces()),
+        string("Parameters").skip(spaces()),
+        between(char('{'), char('}'), parameters()),
+        spaces(),
+        char('}').skip(spaces()),
+    ).map(|(_, name, _, _, library, _, _, params, _, _)| Test {
+        name: match name {
+            ValueType::Text{ data } => data,
+            _ => "".to_string(),
+        },
+        library: match library {
+            ValueType::Text{ data } => data,
+            _ => "".to_string(),
+        },
+        parameters: params,
+    })
+//    (
+//        string("Test").skip(spaces()),
+//        text().skip(spaces()),
+//        char('{').skip(spaces()),
+//        string("Library").skip(spaces()),
+//        text().skip(spaces()),
+//        char(';').skip(spaces()),
+//        string("Parameters").skip(spaces()),
+//        between(char('{'), char('}'), parameters()),
+//        spaces(),
+//        char('}').skip(spaces()),
+//    ).map(|v| Test {
+//        name: "".to_string(),
+//        library: "".to_string(),
+//        parameters: vec![],
+//    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_text() {
-        let result1 = text().parse("L___Hmmm");
-        let result2 = text().parse("fOobAR");
+        let result1 = text().parse("ABC___DEF");
 
-        assert_eq!(result1, Ok((ValueType::Text{ data: "L___Hmmm".to_string() }, "")));
-        assert_eq!(result2, Ok((ValueType::Text{ data: "fOobAR".to_string() }, "")));
+        assert_eq!(result1, Ok((ValueType::Text{ data: "ABC___DEF".to_string() }, "")));
     }
 
     #[test]
     fn test_boolean() {
         let result1 = boolean().parse("true");
         let result2 = boolean().parse("false");
-        let result3 = boolean().parse("tRuE");
-        let result4 = boolean().parse("tue");
+        let result3 = boolean().parse("tue");
 
         assert_eq!(result1, Ok((ValueType::Bool{ data: true }, "")));
         assert_eq!(result2, Ok((ValueType::Bool{ data: false }, "")));
-        assert_eq!(result3, Ok((ValueType::Bool{ data: true }, "")));
-        assert!(result4.is_err());
+        assert!(result3.is_err());
     }
 
     #[test]
     fn test_number() {
         let result1 = number().parse("100V");
         let result2 = number().parse("-15.091mA");
-        let result3 = number().parse("A");
-        let result4 = number().parse("1534");
+        let result3 = number().parse("1534");
+        let result4 = number().parse("A");
 
         assert_eq!(result1, Ok((ValueType::Number{ data: 100f32, unit: Some("V".to_string()) }, "")));
         assert_eq!(result2, Ok((ValueType::Number{ data: -15.091, unit: Some("mA".to_string()) }, "")));
-        assert!(result3.is_err());
-        assert_eq!(result4, Ok((ValueType::Number{ data: 1534f32, unit: None }, "")));
+        assert_eq!(result3, Ok((ValueType::Number{ data: 1534f32, unit: None }, "")));
+        assert!(result4.is_err());
     }
 
     #[test]
@@ -189,7 +231,7 @@ mod tests {
         let result1 = parameter().parse("In Voltage Lower = -1.3V");
         let result2 = parameter().parse("In sigref_expr Pins = Y___MVN03");
         let result3 = parameter().parse("In Bool RequiredAWG = TRUE");
-        let result4 = parameter().parse("      In Integer Dig_Length = 20");
+        let result4 = parameter().parse("In Integer Dig_Length = 20");
 
         assert_eq!(result1, Ok((Param {
             arg_direction: ArgDirection::In,
@@ -219,78 +261,164 @@ mod tests {
 
     #[test]
     fn test_parse_parameters() {
-        let params1 = "In Bool RequiredDig = TRUE;In Integer Dig_Length = 20;";
-        let params2 = "    In Enum BoardType = ALL;
-    In Time Interval = 100us;
-    In Bool RequiredAWG = TRUE;
-    In Integer AWG_StartAddr = 0;
-    In Integer AWG_StopAddr = 19;
-    In Integer AWG_ExecCount = 1;
-    In Bool RequiredDig = TRUE;
-    In Integer Dig_Length = 20;";
+        let params1 = "    In sigref_expr sigref_test = AAA___SR71;
+    In Voltage voltage_test = 141.421356V;
+    In Current current_test = 27.18281828459mA;
+    In String string_test = square;
+    In Integer integer_test = 3141592;
+    In Real real_test = 0.54030;
+    In Time time_test = 16.6666ms;
+    In Bool bool_test = true;
+    In Enum enum_test = ALL;";
         let result1 = parameters().parse(params1);
-        let result2 = parameters().parse(params2);
         assert_eq!(result1, Ok((vec![
                 Param {
                     arg_direction: ArgDirection::In,
-                    param_type: ParamType::Bool,
-                    name: "RequiredDig".to_string(), 
-                    value: ValueType::Bool{ data: true },
+                    param_type: ParamType::Sigrefexpr,
+                    name: "sigref_test".to_string(), 
+                    value: ValueType::Text{ data: "AAA___SR71".to_string() },
                 },
                 Param {
                     arg_direction: ArgDirection::In,
-                    param_type: ParamType::Integer, 
-                    name: "Dig_Length".to_string(), 
-                    value: ValueType::Number{ data: 20f32, unit: None },
-                },], "")));
-        assert_eq!(result2, Ok((vec![
+                    param_type: ParamType::Voltage,
+                    name: "voltage_test".to_string(), 
+                    value: ValueType::Number{ data: 141.421356, unit: Some("V".to_string()) },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Current,
+                    name: "current_test".to_string(), 
+                    value: ValueType::Number{ data: 27.18281828459, unit: Some("mA".to_string()) },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::String, 
+                    name: "string_test".to_string(), 
+                    value: ValueType::Text{ data: "square".to_string() },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Integer,
+                    name: "integer_test".to_string(), 
+                    value: ValueType::Number{ data: 3141592f32, unit: None },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Real,
+                    name: "real_test".to_string(), 
+                    value: ValueType::Number{ data: 0.54030f32, unit: None },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Time,
+                    name: "time_test".to_string(), 
+                    value: ValueType::Number{ data: 16.6666f32, unit: Some("ms".to_string()) },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Bool,
+                    name: "bool_test".to_string(), 
+                    value: ValueType::Bool{ data: true },
+                },
                 Param {
                     arg_direction: ArgDirection::In,
                     param_type: ParamType::Enum,
-                    name: "BoardType".to_string(), 
+                    name: "enum_test".to_string(), 
                     value: ValueType::Text{ data: "ALL".to_string() },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Time, 
-                    name: "Interval".to_string(), 
-                    value: ValueType::Number{ data: 100f32, unit: Some("us".to_string()) },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Bool,
-                    name: "RequiredAWG".to_string(), 
-                    value: ValueType::Bool{ data: true },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Integer, 
-                    name: "AWG_StartAddr".to_string(), 
-                    value: ValueType::Number{ data: 0f32, unit: None },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Integer, 
-                    name: "AWG_StopAddr".to_string(), 
-                    value: ValueType::Number{ data: 19f32, unit: None },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Integer, 
-                    name: "AWG_ExecCount".to_string(), 
-                    value: ValueType::Number{ data: 1f32, unit: None },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Bool,
-                    name: "RequiredDig".to_string(), 
-                    value: ValueType::Bool{ data: true },
-                },
-                Param {
-                    arg_direction: ArgDirection::In,
-                    param_type: ParamType::Integer, 
-                    name: "Dig_Length".to_string(), 
-                    value: ValueType::Number{ data: 20f32, unit: None },
                 },], "")));
+    }
+
+    #[test]
+    pub fn test_test_exec() {
+        let exec1 = "Test A { Library B; Parameters { In Time C = 16.6ms; }}";
+        let exec2 = "Test TestExec_test {
+  Library testLibrary;
+  Parameters {
+    In sigref_expr sigref_test = AAA___SR71;
+    In Voltage voltage_test = 141.421356V;
+    In Current current_test = 27.18281828459mA;
+    In String string_test = square;
+    In Integer integer_test = 3141592;
+    In Real real_test = 0.54030;
+    In Time time_test = 16.6666ms;
+    In Bool bool_test = true;
+    In Enum enum_test = ALL;
+  }
+}";
+
+        let result1 = test_exec().parse(exec1);
+        let result2 = test_exec().parse(exec2);
+        
+        assert_eq!(result1, Ok((Test {
+            name: "A".to_string(),
+            library: "B".to_string(),
+            parameters: vec![
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Time,
+                    name: "C".to_string(), 
+                    value: ValueType::Number{ data: 16.6f32, unit: Some("ms".to_string()) },
+                },
+            ],
+        }, "")));
+        assert_eq!(result2, Ok((Test {
+            name: "TestExec_test".to_string(),
+            library: "testLibrary".to_string(),
+            parameters: vec![
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Sigrefexpr,
+                    name: "sigref_test".to_string(), 
+                    value: ValueType::Text{ data: "AAA___SR71".to_string() },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Voltage,
+                    name: "voltage_test".to_string(), 
+                    value: ValueType::Number{ data: 141.421356, unit: Some("V".to_string()) },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Current,
+                    name: "current_test".to_string(), 
+                    value: ValueType::Number{ data: 27.18281828459, unit: Some("mA".to_string()) },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::String, 
+                    name: "string_test".to_string(), 
+                    value: ValueType::Text{ data: "square".to_string() },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Integer,
+                    name: "integer_test".to_string(), 
+                    value: ValueType::Number{ data: 3141592f32, unit: None },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Real,
+                    name: "real_test".to_string(), 
+                    value: ValueType::Number{ data: 0.54030f32, unit: None },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Time,
+                    name: "time_test".to_string(), 
+                    value: ValueType::Number{ data: 16.6666f32, unit: Some("ms".to_string()) },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Bool,
+                    name: "bool_test".to_string(), 
+                    value: ValueType::Bool{ data: true },
+                },
+                Param {
+                    arg_direction: ArgDirection::In,
+                    param_type: ParamType::Enum,
+                    name: "enum_test".to_string(), 
+                    value: ValueType::Text{ data: "ALL".to_string() },
+                },],
+        }, "")));
     }
 }
